@@ -7,27 +7,55 @@ using VerifySourceGenerator = AutoConstructor.Tests.Verifiers.CSharpSourceGenera
 
 namespace AutoConstructor.Tests;
 
-public class GeneratorTests
+public class RecordGeneratorTests
 {
     [Fact]
-    public async Task Run_WithAttributeAndPartial_ShouldGenerateClass()
+    public async Task Run_WithAttributeAndPartial_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly int _t;
     }
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int t)
         {
             this._t = t;
+        }
+    }
+}
+";
+        await VerifySourceGenerator.RunAsync(code, generated);
+    }
+
+    [Fact]
+    public async Task Run_WithAttributeShortSyntax_ShouldGenerateRecord()
+    {
+        const string code = @"
+namespace Test
+{
+    [AutoConstructor]
+    internal partial record Test : TestBase {
+        public int Age {get;}
+    }
+
+    record TestBase (double Weight);
+
+}";
+        const string generated = @"namespace Test
+{
+    partial record Test
+    {
+        public Test(int age, double Weight) : base(Weight)
+        {
+            this.Age = age;
         }
     }
 }
@@ -40,14 +68,14 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(""guid.ToString()"", ""guid"", typeof(System.Guid))]
         private readonly string _guidString;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Guid guid)
         {
@@ -60,14 +88,14 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(injectedType: typeof(System.Guid), parameterName: ""guid"", initializer: ""guid.ToString()"")]
         private readonly string _guidString;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Guid guid)
         {
@@ -80,14 +108,14 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(null, ""guid"", typeof(string))]
         private readonly string _guidString;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(string guid)
         {
@@ -100,7 +128,7 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly System.Guid _guid;
         [AutoConstructorInject(""guid.ToString()"", ""guid"", null)]
@@ -108,7 +136,7 @@ namespace Test
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Guid guid)
         {
@@ -122,14 +150,14 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(""guid.ToString()"", ""guid"", null)]
         private readonly string _guidString;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(string guid)
         {
@@ -142,14 +170,14 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(initializer: ""guid.ToString()"", injectedType: typeof(System.Guid))]
         private readonly string _guid;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Guid guid)
         {
@@ -162,14 +190,14 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(parameterName: ""guid"")]
         private readonly string _guidString;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(string guid)
         {
@@ -178,7 +206,7 @@ namespace Test
     }
 }
 ")]
-    public async Task Run_WithInjectAttribute_ShouldGenerateClass(string code, string generated)
+    public async Task Run_WithInjectAttribute_ShouldGenerateRecord(string code, string generated)
     {
         await VerifySourceGenerator.RunAsync(code, generated);
     }
@@ -188,7 +216,7 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
     }
 }")]
@@ -196,7 +224,7 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorIgnore]
         private readonly int _ignore;
@@ -206,7 +234,7 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly int _ignore = 0;
     }
@@ -215,24 +243,24 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private int _ignore;
     }
 }")]
-    public async Task Run_NoFieldsToInject_ShouldNotGenerateClass(string code)
+    public async Task Run_NoFieldsToInject_ShouldNotGenerateRecord(string code)
     {
         await VerifySourceGenerator.RunAsync(code);
     }
 
     [Fact]
-    public async Task Run_WithAttributeAndWithoutPartial_ShouldNotGenerateClass()
+    public async Task Run_WithAttributeAndWithoutPartial_ShouldNotGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal class Test
+    internal record Test
     {
         private readonly int _t;
     }
@@ -242,15 +270,15 @@ namespace Test
     }
 
     [Fact]
-    public async Task Run_ClassWithoutNamespace_ShouldGenerateClass()
+    public async Task Run_RecordWithoutNamespace_ShouldGenerateRecord()
     {
         const string code = @"
 [AutoConstructor]
-internal partial class Test
+internal partial record Test
 {
     private readonly int _t;
 }";
-        const string generated = @"partial class Test
+        const string generated = @"partial record Test
 {
     public Test(int t)
     {
@@ -266,20 +294,20 @@ internal partial class Test
     [InlineData("t")]
     [InlineData("_t")]
     [InlineData("__t")]
-    public async Task Run_IdentifierWithOrWithoutUnderscore_ShouldGenerateSameClass(string identifier)
+    public async Task Run_IdentifierWithOrWithoutUnderscore_ShouldGenerateSameRecord(string identifier)
     {
         string code = $@"
 namespace Test
 {{
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {{
         private readonly int {identifier};
     }}
 }}";
         string generated = $@"namespace Test
 {{
-    partial class Test
+    partial record Test
     {{
         public Test(int t)
         {{
@@ -294,20 +322,20 @@ namespace Test
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Run_WithMsbuildConfigNullChecks_ShouldGenerateClass(bool disableNullChecks)
+    public async Task Run_WithMsbuildConfigNullChecks_ShouldGenerateRecord(bool disableNullChecks)
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly string _t;
     }
 }";
         string generated = $@"namespace Test
 {{
-    partial class Test
+    partial record Test
     {{
         public Test(string t)
         {{
@@ -323,13 +351,13 @@ namespace Test
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Run_WithMsbuildConfigGenerateDocumentation_ShouldGenerateClass(bool generateDocumentation)
+    public async Task Run_WithMsbuildConfigGenerateDocumentation_ShouldGenerateRecord(bool generateDocumentation)
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         /// <summary>
         /// Some field.
@@ -341,7 +369,7 @@ namespace Test
 
         string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(string t1, string t2)
         {
@@ -356,10 +384,10 @@ namespace Test
         {
             generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         /// <summary>
-        /// Initializes a new instance of the Test class.
+        /// Initializes a new instance of the Test record.
         /// </summary>
         /// <param name=""t1"">Some field.</param>
         /// <param name=""t2"">t2</param>
@@ -381,15 +409,15 @@ namespace Test
 
     [Theory]
     [InlineData(false, "")]
-    [InlineData(true, "Class {0} comment")]
+    [InlineData(true, "Record {0} comment")]
     [InlineData(true, "")]
-    public async Task Run_WithMsbuildConfigGenerateDocumentationWithCustomComment_ShouldGenerateClass(bool hasCustomComment, string commentConfig)
+    public async Task Run_WithMsbuildConfigGenerateDocumentationWithCustomComment_ShouldGenerateRecord(bool hasCustomComment, string commentConfig)
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         /// <summary>
         /// Some field.
@@ -402,11 +430,11 @@ namespace Test
         string comment = string.Format(CultureInfo.InvariantCulture, commentConfig, "Test");
         if (string.IsNullOrWhiteSpace(comment))
         {
-            comment = "Initializes a new instance of the Test class.";
+            comment = "Initializes a new instance of the Test record.";
         }
         string generated = $@"namespace Test
 {{
-    partial class Test
+    partial record Test
     {{
         /// <summary>
         /// {comment}
@@ -438,13 +466,13 @@ build_property.AutoConstructor_ConstructorDocumentationComment = {commentConfig}
     }
 
     [Fact]
-    public async Task Run_WithMismatchingTypes_ShouldNotGenerateClass()
+    public async Task Run_WithMismatchingTypes_ShouldNotGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(""guid.ToString()"", ""guid"", typeof(System.Guid))]
         private readonly string _i;
@@ -457,13 +485,13 @@ namespace Test
     }
 
     [Fact]
-    public async Task Run_WithMismatchingFallbackTypes_ShouldNotGenerateClass()
+    public async Task Run_WithMismatchingFallbackTypes_ShouldNotGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(null, ""guid"", null)]
         private readonly string _i;
@@ -478,20 +506,20 @@ namespace Test
     }
 
     [Fact]
-    public async Task Run_WithAliasForAttribute_ShouldGenerateClass()
+    public async Task Run_WithAliasForAttribute_ShouldGenerateRecord()
     {
         const string code = @"using Alias = AutoConstructorAttribute;
 namespace Test
 {
     [Alias]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly int _t;
     }
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int t)
         {
@@ -507,7 +535,7 @@ namespace Test
     [InlineData(@"namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly string? _t1;
         private readonly string _t2;
@@ -517,7 +545,7 @@ namespace Test
 }", @"#nullable enable
 namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(string? t1, string t2, int d1, int? d2)
         {
@@ -532,14 +560,14 @@ namespace Test
     [InlineData(@"using System.Threading.Tasks;namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly Task<object?> _t1;
     }
 }", @"#nullable enable
 namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Threading.Tasks.Task<object?> t1)
         {
@@ -551,14 +579,14 @@ namespace Test
     [InlineData(@"using System.Threading.Tasks;namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly Task<Task<object?>> _t1;
     }
 }", @"#nullable enable
 namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Threading.Tasks.Task<System.Threading.Tasks.Task<object?>> t1)
         {
@@ -570,12 +598,12 @@ namespace Test
     [InlineData(@"using System.Threading.Tasks;namespace Test
 {
     [AutoConstructor]
-    internal partial class Test : TestBase
+    internal partial record Test : TestBase
     {
         
     }
 
-    internal partial class TestBase
+    internal partial record TestBase
     {
         public readonly Task<Task<object?>> _t1;
 
@@ -587,7 +615,7 @@ namespace Test
 }", @"#nullable enable
 namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Threading.Tasks.Task<System.Threading.Tasks.Task<object?>> t1) : base(t1)
         {
@@ -595,7 +623,7 @@ namespace Test
     }
 }
 ")]
-    public async Task Run_WithNullableReferenceType_ShouldGenerateClass(string code, string generated)
+    public async Task Run_WithNullableReferenceType_ShouldGenerateRecord(string code, string generated)
     {
         await VerifySourceGenerator.RunAsync(code, generated, nullable: true);
     }
@@ -603,19 +631,19 @@ namespace Test
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Run_WithOrWithoutNullableReferenceType_ShouldGenerateClassWithNullCheck(bool enableBoolean)
+    public async Task Run_WithOrWithoutNullableReferenceType_ShouldGenerateRecordWithNullCheck(bool enableBoolean)
     {
         const string code = @"namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly string _t;
     }
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(string t)
         {
@@ -631,19 +659,19 @@ namespace Test
     [InlineData(@"
 namespace Nested
 {
-    internal partial class Outer
+    internal partial record Outer
     {
         [AutoConstructor]
-        internal partial class Inner
+        internal partial record Inner
         {
             private readonly int _t;
         }
     }
 }", @"namespace Nested
 {
-    partial class Outer
+    partial record Outer
     {
-        partial class Inner
+        partial record Inner
         {
             public Inner(int t)
             {
@@ -654,41 +682,16 @@ namespace Nested
 }
 ", "Nested.Outer.Inner.g.cs")]
     [InlineData(@"
-namespace Nested
-{
-    internal static partial class Outer
-    {
-        [AutoConstructor]
-        internal partial class Inner
-        {
-            private readonly int _t;
-        }
-    }
-}", @"namespace Nested
-{
-    static partial class Outer
-    {
-        partial class Inner
-        {
-            public Inner(int t)
-            {
-                this._t = t;
-            }
-        }
-    }
-}
-", "Nested.Outer.Inner.g.cs")]
-    [InlineData(@"
-internal static partial class Outer
+internal partial record Outer
 {
     [AutoConstructor]
-    internal partial class Inner
+    internal partial record Inner
     {
         private readonly int _t;
     }
-}", @"static partial class Outer
+}", @"partial record Outer
 {
-    partial class Inner
+    partial record Inner
     {
         public Inner(int t)
         {
@@ -698,40 +701,21 @@ internal static partial class Outer
 }
 ", "Outer.Inner.g.cs")]
     [InlineData(@"
-internal partial class Outer
+internal partial record Outer1
 {
-    [AutoConstructor]
-    internal partial class Inner
-    {
-        private readonly int _t;
-    }
-}", @"partial class Outer
-{
-    partial class Inner
-    {
-        public Inner(int t)
-        {
-            this._t = t;
-        }
-    }
-}
-", "Outer.Inner.g.cs")]
-    [InlineData(@"
-internal partial class Outer1
-{
-    internal partial class Outer2
+    internal partial record Outer2
     {
         [AutoConstructor]
-        internal partial class Inner
+        internal partial record Inner
         {
             private readonly int _t;
         }
     }
-}", @"partial class Outer1
+}", @"partial record Outer1
 {
-    partial class Outer2
+    partial record Outer2
     {
-        partial class Inner
+        partial record Inner
         {
             public Inner(int t)
             {
@@ -741,56 +725,19 @@ internal partial class Outer1
     }
 }
 ", "Outer1.Outer2.Inner.g.cs")]
-    [InlineData(@"
-namespace Nested
-{
-    internal partial class Outer0
-    {
-        static internal partial class Outer1
-        {
-            internal partial class Outer2
-            {
-                [AutoConstructor]
-                internal partial class Inner
-                {
-                    private readonly int _t;
-                }
-            }
-        }
-    }
-}", @"namespace Nested
-{
-    partial class Outer0
-    {
-        static partial class Outer1
-        {
-            partial class Outer2
-            {
-                partial class Inner
-                {
-                    public Inner(int t)
-                    {
-                        this._t = t;
-                    }
-                }
-            }
-        }
-    }
-}
-", "Nested.Outer0.Outer1.Outer2.Inner.g.cs")]
-    public async Task Run_WithNestedClass_ShouldGenerateClass(string code, string generated, string generatedName)
+    public async Task Run_WithNestedRecord_ShouldGenerateRecord(string code, string generated, string generatedName)
     {
         await VerifySourceGenerator.RunAsync(code, generated, generatedName: generatedName);
     }
 
     [Fact]
-    public async Task Run_WithInjectAttributeOnProperties_ShouldGenerateClass()
+    public async Task Run_WithInjectAttributeOnProperties_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [field: AutoConstructorInject]
         public int Injected { get; }
@@ -821,10 +768,10 @@ namespace Test
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         /// <summary>
-        /// Initializes a new instance of the Test class.
+        /// Initializes a new instance of the Test record.
         /// </summary>
         /// <param name=""injected"">injected</param>
         /// <param name=""injectedWithDocumentation"">Some property.</param>
@@ -846,13 +793,13 @@ namespace Test
     }
 
     [Fact]
-    public async Task Run_WithRecordLikeClass_ShouldGenerateClass()
+    public async Task Run_WithRecordLikeRecord_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    public partial class Test
+    public partial record Test
     {
         public string Name { get; }
         public string LastName { get; }
@@ -860,7 +807,7 @@ namespace Test
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(string name, string lastName)
         {
@@ -875,13 +822,13 @@ namespace Test
     }
 
     [Fact]
-    public async Task Run_AllKindsOfFields_ShouldGenerateClass()
+    public async Task Run_AllKindsOfFields_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly int _t1;
         public readonly int _t2;
@@ -893,7 +840,7 @@ namespace Test
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int t1, int t2, int t3)
         {
@@ -913,7 +860,7 @@ namespace Test
         const string code = @"
 namespace Test
 {
-    internal class TestBase
+    internal record TestBase
     {
         private static readonly int _s = 1;
 
@@ -926,13 +873,13 @@ namespace Test
     }
 
     [AutoConstructor]
-    internal partial class Test : TestBase
+    internal partial record Test : TestBase
     {
     }
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int t1) : base(t1)
         {
@@ -944,25 +891,25 @@ namespace Test
     }
 
     [Fact]
-    public async Task Run_MultiplePartialParts_ShouldGenerateClass()
+    public async Task Run_MultiplePartialParts_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         private readonly int _i1;
     }
 
-    internal partial class Test
+    internal partial record Test
     {
         private readonly int _i2;
     }
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int i1, int i2)
         {
@@ -982,13 +929,13 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test
+    internal partial record Test
     {
         [AutoConstructorInject(""guid.ToString()"", ""guid"", typeof(System.Guid))]
         private readonly string _i;
     }
 
-    internal partial class Test
+    internal partial record Test
     {
         private readonly string _guid;
     }
@@ -1004,13 +951,13 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test<T>
+    internal partial record Test<T>
     {
         private readonly T _generic;
     }
 }", @"namespace Test
 {
-    partial class Test<T>
+    partial record Test<T>
     {
         public Test(T generic)
         {
@@ -1023,14 +970,14 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test<T1, T2>
+    internal partial record Test<T1, T2>
     {
         private readonly T1 _generic1;
         private readonly T2 _generic2;
     }
 }", @"namespace Test
 {
-    partial class Test<T1, T2>
+    partial record Test<T1, T2>
     {
         public Test(T1 generic1, T2 generic2)
         {
@@ -1044,13 +991,13 @@ namespace Test
 namespace Test
 {
     [AutoConstructor]
-    internal partial class Test<T> where T : class
+    internal partial record Test<T> where T : class
     {
         private readonly T _generic;
     }
 }", @"namespace Test
 {
-    partial class Test<T>
+    partial record Test<T>
     {
         public Test(T generic)
         {
@@ -1062,19 +1009,19 @@ namespace Test
     [InlineData(@"
 namespace Nested
 {
-    internal partial class Outer<T>
+    internal partial record Outer<T>
     {
         [AutoConstructor]
-        internal partial class Inner
+        internal partial record Inner
         {
             private readonly T _t;
         }
     }
 }", @"namespace Nested
 {
-    partial class Outer<T>
+    partial record Outer<T>
     {
-        partial class Inner
+        partial record Inner
         {
             public Inner(T t)
             {
@@ -1087,10 +1034,10 @@ namespace Nested
     [InlineData(@"
 namespace Nested
 {
-    internal partial class Outer<T1>
+    internal partial record Outer<T1>
     {
         [AutoConstructor]
-        internal partial class Inner<T2>
+        internal partial record Inner<T2>
         {
             private readonly T1 _t1;
             private readonly T2 _t2;
@@ -1098,9 +1045,9 @@ namespace Nested
     }
 }", @"namespace Nested
 {
-    partial class Outer<T1>
+    partial record Outer<T1>
     {
-        partial class Inner<T2>
+        partial record Inner<T2>
         {
             public Inner(T1 t1, T2 t2)
             {
@@ -1117,13 +1064,13 @@ namespace Test
     interface IThing<T> {}
 
     [AutoConstructor]
-    internal partial class Test<T>
+    internal partial record Test<T>
     {
         private readonly IThing<T> _generic;
     }
 }", @"namespace Test
 {
-    partial class Test<T>
+    partial record Test<T>
     {
         public Test(Test.IThing<T> generic)
         {
@@ -1132,33 +1079,33 @@ namespace Test
     }
 }
 ")]
-    public async Task Run_WithGenericClass_ShouldGenerateClass(string code, string generated, string generatedName = "Test.Test.T.g.cs")
+    public async Task Run_WithGenericRecord_ShouldGenerateRecord(string code, string generated, string generatedName = "Test.Test.T.g.cs")
     {
         await VerifySourceGenerator.RunAsync(code, generated, generatedName: generatedName);
     }
 
     [Fact]
-    public async Task Run_WithBasicInheritance_ShouldGenerateClass()
+    public async Task Run_WithBasicInheritance_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
-    internal class BaseClass
+    internal record BaseRecord
     {
         private readonly int _t;
-        public BaseClass(int t)
+        public BaseRecord(int t)
         {
             this._t = t;
         }
     }
     [AutoConstructor]
-    internal partial class Test : BaseClass
+    internal partial record Test : BaseRecord
     {
     }
 }";
         const string generated = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int t) : base(t)
         {
@@ -1173,25 +1120,25 @@ namespace Test
     [InlineData(@"
 namespace Test
 {
-    internal class BaseClass
+    internal record BaseRecord
     {
         private readonly int _t;
         private readonly System.Guid _guid;
-        public BaseClass(System.Guid guid, int t)
+        public BaseRecord(System.Guid guid, int t)
         {
             this._t = t;
             this._guid = guid;
         }
     }
     [AutoConstructor]
-    internal partial class Test : BaseClass
+    internal partial record Test : BaseRecord
     {
         [AutoConstructorInject(parameterName: ""guid"")]
         private readonly System.Guid _guid2;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Guid guid, int t) : base(guid, t)
         {
@@ -1203,22 +1150,22 @@ namespace Test
     [InlineData(@"
 namespace Test
 {
-    internal class BaseClass
+    internal record BaseRecord
     {
         private readonly int _t;
-        public BaseClass(int t)
+        public BaseRecord(int t)
         {
             this._t = t;
         }
     }
     [AutoConstructor]
-    internal partial class Test : BaseClass
+    internal partial record Test : BaseRecord
     {
         private readonly System.Guid _guid;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Guid guid, int t) : base(t)
         {
@@ -1230,30 +1177,30 @@ namespace Test
     [InlineData(@"
 namespace Test
 {
-    internal class UpperClass
+    internal record UpperRecord
     {
         private readonly System.DateTime _date;
-        public UpperClass(System.DateTime date)
+        public UpperRecord(System.DateTime date)
         {
             this._date = date;
         }
     }
-    internal class BaseClass : UpperClass
+    internal record BaseRecord : UpperRecord
     {
         private readonly int _t;
-        public BaseClass(System.DateTime date, int t) : base(date)
+        public BaseRecord(System.DateTime date, int t) : base(date)
         {
             this._t = t;
         }
     }
     [AutoConstructor]
-    internal partial class Test : BaseClass
+    internal partial record Test : BaseRecord
     {
         private readonly System.Guid _guid;
     }
 }", @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(System.Guid guid, System.DateTime date, int t) : base(date, t)
         {
@@ -1262,30 +1209,30 @@ namespace Test
     }
 }
 ")]
-    public async Task Run_WithInheritanceAndFieldsInBothClasses_ShouldGenerateClass(string code, string generated)
+    public async Task Run_WithInheritanceAndFieldsInBothRecords_ShouldGenerateRecord(string code, string generated)
     {
         await VerifySourceGenerator.RunAsync(code, generated);
     }
 
     [Fact]
-    public async Task Run_WithInheritanceAlsoGenerated_ShouldGenerateClass()
+    public async Task Run_WithInheritanceAlsoGenerated_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class BaseClass
+    internal partial record BaseRecord
     {
         private readonly int _t;
     }
     [AutoConstructor]
-    internal partial class Test : BaseClass
+    internal partial record Test : BaseRecord
     {
     }
 }";
         const string generatedTest = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int t) : base(t)
         {
@@ -1296,42 +1243,42 @@ namespace Test
 
         const string generatedBase = @"namespace Test
 {
-    partial class BaseClass
+    partial record BaseRecord
     {
-        public BaseClass(int t)
+        public BaseRecord(int t)
         {
             this._t = t;
         }
     }
 }
 ";
-        await VerifySourceGenerator.RunAsync(code, new[] { (generatedBase, "Test.BaseClass.g.cs"), (generatedTest, "Test.Test.g.cs") });
+        await VerifySourceGenerator.RunAsync(code, new[] { (generatedBase, "Test.BaseRecord.g.cs"), (generatedTest, "Test.Test.g.cs") });
     }
 
     [Fact]
-    public async Task Run_WithMultipleInheritanceAlsoGenerated_ShouldGenerateClass()
+    public async Task Run_WithMultipleInheritanceAlsoGenerated_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
     [AutoConstructor]
-    internal partial class MotherClass
+    internal partial record MotherRecord
     {
         private readonly string _s;
     }
     [AutoConstructor]
-    internal partial class BaseClass : MotherClass
+    internal partial record BaseRecord : MotherRecord
     {
         private readonly int _t;
     }
     [AutoConstructor]
-    internal partial class Test : BaseClass
+    internal partial record Test : BaseRecord
     {
     }
 }";
         const string generatedTest = @"namespace Test
 {
-    partial class Test
+    partial record Test
     {
         public Test(int t, string s) : base(t, s)
         {
@@ -1342,9 +1289,9 @@ namespace Test
 
         const string generatedBase = @"namespace Test
 {
-    partial class BaseClass
+    partial record BaseRecord
     {
-        public BaseClass(int t, string s) : base(s)
+        public BaseRecord(int t, string s) : base(s)
         {
             this._t = t;
         }
@@ -1354,9 +1301,9 @@ namespace Test
 
         const string generatedMother = @"namespace Test
 {
-    partial class MotherClass
+    partial record MotherRecord
     {
-        public MotherClass(string s)
+        public MotherRecord(string s)
         {
             this._s = s ?? throw new System.ArgumentNullException(nameof(s));
         }
@@ -1365,62 +1312,62 @@ namespace Test
 ";
         await VerifySourceGenerator.RunAsync(code, new[]
         {
-            (generatedMother, "Test.MotherClass.g.cs"),
-            (generatedBase, "Test.BaseClass.g.cs"),
+            (generatedMother, "Test.MotherRecord.g.cs"),
+            (generatedBase, "Test.BaseRecord.g.cs"),
             (generatedTest, "Test.Test.g.cs")
         });
     }
 
     [Fact]
-    public async Task Run_WithMultipleInheritanceGeneratedAndNotGenerated_ShouldGenerateClass()
+    public async Task Run_WithMultipleInheritanceGeneratedAndNotGenerated_ShouldGenerateRecord()
     {
         const string code = @"
 namespace Test
 {
-    internal class Class1
+    internal record Record1
     {
         private readonly string _s;
-        public Class1(string s)
+        public Record1(string s)
         {
             this._s = s ?? throw new System.ArgumentNullException(nameof(s));
         }
     }
     [AutoConstructor]
-    internal partial class Class2 : Class1
+    internal partial record Record2 : Record1
     {
         private readonly int _t;
     }
     [AutoConstructor]
-    internal partial class Class3 : Class2
+    internal partial record Record3 : Record2
     {
     }
-    internal class Class4 : Class3
+    internal record Record4 : Record3
     {
-        public Class4(int t, string s) : base(t, s)
+        public Record4(int t, string s) : base(t, s)
         {
         }
     }
     [AutoConstructor]
-    internal partial class Class5 : Class4
+    internal partial record Record5 : Record4
     {
     }
 }";
-        const string generatedClass3 = @"namespace Test
+        const string generatedRecord3 = @"namespace Test
 {
-    partial class Class3
+    partial record Record3
     {
-        public Class3(int t, string s) : base(t, s)
+        public Record3(int t, string s) : base(t, s)
         {
         }
     }
 }
 ";
 
-        const string generatedClass2 = @"namespace Test
+        const string generatedRecord2 = @"namespace Test
 {
-    partial class Class2
+    partial record Record2
     {
-        public Class2(int t, string s) : base(s)
+        public Record2(int t, string s) : base(s)
         {
             this._t = t;
         }
@@ -1428,11 +1375,11 @@ namespace Test
 }
 ";
 
-        const string generatedClass5 = @"namespace Test
+        const string generatedRecord5 = @"namespace Test
 {
-    partial class Class5
+    partial record Record5
     {
-        public Class5(int t, string s) : base(t, s)
+        public Record5(int t, string s) : base(t, s)
         {
         }
     }
@@ -1440,9 +1387,9 @@ namespace Test
 ";
         await VerifySourceGenerator.RunAsync(code, new[]
         {
-            (generatedClass2, "Test.Class2.g.cs"),
-            (generatedClass3, "Test.Class3.g.cs"),
-            (generatedClass5, "Test.Class5.g.cs")
+            (generatedRecord2, "Test.Record2.g.cs"),
+            (generatedRecord3, "Test.Record3.g.cs"),
+            (generatedRecord5, "Test.Record5.g.cs")
         });
     }
 }

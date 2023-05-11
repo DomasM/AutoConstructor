@@ -37,13 +37,14 @@ internal static class CSharpSourceGeneratorVerifier<TSourceGenerator>
                     Sources = { code },
                     GeneratedSources =
                     {
-                        (typeof(AutoConstructorGenerator), "AutoConstructorAttribute.cs", SourceText.From(Source.AttributeText, Encoding.UTF8)),
-                        (typeof(AutoConstructorGenerator), "AutoConstructorIgnoreAttribute.cs", SourceText.From(Source.IgnoreAttributeText, Encoding.UTF8)),
-                        (typeof(AutoConstructorGenerator), "AutoConstructorInjectAttribute.cs", SourceText.From(Source.InjectAttributeText, Encoding.UTF8)),
+                        (typeof(TSourceGenerator), "AutoConstructorAttribute.cs", SourceText.From(Source.AttributeText, Encoding.UTF8)),
+                        (typeof(TSourceGenerator), "AutoConstructorIgnoreAttribute.cs", SourceText.From(Source.IgnoreAttributeText, Encoding.UTF8)),
+                        (typeof(TSourceGenerator), "AutoConstructorInjectAttribute.cs", SourceText.From(Source.InjectAttributeText, Encoding.UTF8)),
                     }
                 },
             EnableNullable = nullable,
-            LanguageVersion = LanguageVersion.Default,
+            LanguageVersion = LanguageVersion.CSharp10,
+            ReferenceAssemblies = ReferenceAssemblies.Net.Net60
         };
 
         foreach ((string? generated, string generatedName) in generatedSources)
@@ -59,7 +60,7 @@ internal static class CSharpSourceGeneratorVerifier<TSourceGenerator>
 // </auto-generated>
 //------------------------------------------------------------------------------
 {generated}";
-                test.TestState.GeneratedSources.Add((typeof(AutoConstructorGenerator), generatedName, SourceText.From(generatedWithHeader, Encoding.UTF8)));
+                test.TestState.GeneratedSources.Add((typeof(TSourceGenerator), generatedName, SourceText.From(generatedWithHeader, Encoding.UTF8)));
             }
         }
 

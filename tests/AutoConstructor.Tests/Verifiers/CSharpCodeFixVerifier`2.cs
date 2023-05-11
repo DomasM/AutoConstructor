@@ -22,6 +22,7 @@ internal static class CSharpCodeFixVerifier<TAnalyzer, TCodeFix>
         var test = new Test
         {
             TestCode = AppendBaseCode(source),
+            ReferenceAssemblies = ReferenceAssemblies.Net.Net60
         };
 
         test.ExpectedDiagnostics.AddRange(expected);

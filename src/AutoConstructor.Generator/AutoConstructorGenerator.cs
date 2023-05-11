@@ -11,7 +11,7 @@ using Microsoft.CodeAnalysis.Text;
 namespace AutoConstructor.Generator;
 
 [Generator]
-public class AutoConstructorGenerator : IIncrementalGenerator
+public class CombinedAutoConstructorGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -23,41 +23,76 @@ public class AutoConstructorGenerator : IIncrementalGenerator
             i.AddSource(Source.InjectAttributeFullName, SourceText.From(Source.InjectAttributeText, Encoding.UTF8));
         });
 
-        IncrementalValuesProvider<ClassDeclarationSyntax> classDeclarations = context.SyntaxProvider
+        var classGenerator = new AutoConstructorGenerator<ClassDeclarationSyntax>(new ConstructorSelector(), () => new ClassGenerator());
+        classGenerator.Initialize(context);
+        var recordGenerator = new AutoConstructorGenerator<RecordDeclarationSyntax>(new ConstructorSelector(), () => new RecordGenerator());
+        recordGenerator.Initialize(context);
+    }
+}
+
+public class ConstructorSelector : IConstructorSelector
+{
+    public List<IMethodSymbol> SelectValidConstructors(INamedTypeSymbol baseType, Compilation compilation)
+    {
+        IEnumerable<IMethodSymbol> nonStatic = baseType.Constructors.Where(d => !d.IsStatic);
+        //records have strange constructor which has single parameter of the record itself type
+        return nonStatic.Where(d => !(d.IsImplicitlyDeclared && d.Parameters.Length == 1 && SymbolEqualityComparer.Default.Equals(d.Parameters[0].Type, baseType))).ToList();
+    }
+}
+
+public interface IConstructorSelector
+{
+    List<IMethodSymbol> SelectValidConstructors(INamedTypeSymbol baseType, Compilation compilation);
+}
+
+public class AutoConstructorGenerator<TTarget> : IIncrementalGenerator where TTarget : TypeDeclarationSyntax
+{
+    private readonly IConstructorSelector _constructorSelector;
+    private readonly Func<CodeGenerator<TTarget>> _createGenerator;
+
+    public AutoConstructorGenerator(IConstructorSelector constructorSelector, Func<CodeGenerator<TTarget>> createGenerator)
+    {
+        _constructorSelector = constructorSelector;
+        _createGenerator = createGenerator;
+    }
+
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        IncrementalValuesProvider<TTarget> classDeclarations = context.SyntaxProvider
                 .CreateSyntaxProvider(static (s, _) => IsSyntaxTargetForGeneration(s), static (ctx, _) => GetSemanticTargetForGeneration(ctx))
                 .Where(static m => m is not null)!;
 
-        IncrementalValueProvider<(Compilation compilation, ImmutableArray<ClassDeclarationSyntax> classes, AnalyzerConfigOptions options)> valueProvider =
+        IncrementalValueProvider<(Compilation compilation, ImmutableArray<TTarget> classes, AnalyzerConfigOptions options)> valueProvider =
             context.CompilationProvider
             .Combine(classDeclarations.Collect())
             .Combine(context.AnalyzerConfigOptionsProvider.Select((c, _) => c.GlobalOptions))
             .Select((c, _) => (compilation: c.Left.Left, classes: c.Left.Right, options: c.Right));
 
-        context.RegisterSourceOutput(valueProvider, static (spc, source) => Execute(source.compilation, source.classes, spc, source.options));
+        context.RegisterSourceOutput(valueProvider, (spc, source) => Execute(source.compilation, source.classes, spc, source.options, _constructorSelector, _createGenerator));
     }
 
     private static bool IsSyntaxTargetForGeneration(SyntaxNode node)
     {
-        return node is ClassDeclarationSyntax classDeclarationSyntax && classDeclarationSyntax.Modifiers.Any(SyntaxKind.PartialKeyword);
+        return node is TTarget TTarget && TTarget.Modifiers.Any(SyntaxKind.PartialKeyword);
     }
 
-    private static ClassDeclarationSyntax? GetSemanticTargetForGeneration(GeneratorSyntaxContext context)
+    private static TTarget? GetSemanticTargetForGeneration(GeneratorSyntaxContext context)
     {
-        var classDeclarationSyntax = (ClassDeclarationSyntax)context.Node;
+        var TTarget = (TTarget)context.Node;
 
-        INamedTypeSymbol? symbol = context.SemanticModel.GetDeclaredSymbol(classDeclarationSyntax);
+        INamedTypeSymbol? symbol = context.SemanticModel.GetDeclaredSymbol(TTarget);
 
-        return symbol?.HasAttribute(Source.AttributeFullName, context.SemanticModel.Compilation) is true ? classDeclarationSyntax : null;
+        return symbol?.HasAttribute(Source.AttributeFullName, context.SemanticModel.Compilation) is true ? TTarget : null;
     }
 
-    private static void Execute(Compilation compilation, ImmutableArray<ClassDeclarationSyntax> classes, SourceProductionContext context, AnalyzerConfigOptions options)
+    private static void Execute(Compilation compilation, ImmutableArray<TTarget> classes, SourceProductionContext context, AnalyzerConfigOptions options, IConstructorSelector constructorSelector, Func<CodeGenerator<TTarget>> codeGenerator)
     {
         if (classes.IsDefaultOrEmpty)
         {
             return;
         }
 
-        IEnumerable<IGrouping<ISymbol?, ClassDeclarationSyntax>> classesBySymbol = Enumerable.Empty<IGrouping<ISymbol?, ClassDeclarationSyntax>>();
+        IEnumerable<IGrouping<ISymbol?, TTarget>> classesBySymbol = Enumerable.Empty<IGrouping<ISymbol?, TTarget>>();
         try
         {
             classesBySymbol = classes.GroupBy(c => compilation.GetSemanticModel(c.SyntaxTree).GetDeclaredSymbol(c), SymbolEqualityComparer.Default);
@@ -67,7 +102,7 @@ public class AutoConstructorGenerator : IIncrementalGenerator
             return;
         }
 
-        foreach (IGrouping<ISymbol?, ClassDeclarationSyntax> groupedClasses in classesBySymbol)
+        foreach (IGrouping<ISymbol?, TTarget> groupedClasses in classesBySymbol)
         {
             if (context.CancellationToken.IsCancellationRequested)
             {
@@ -106,7 +141,7 @@ public class AutoConstructorGenerator : IIncrementalGenerator
 
                 List<FieldInfo> concatenatedFields = GetFieldsFromSymbol(compilation, symbol, emitNullChecks);
 
-                ExtractFieldsFromParent(compilation, symbol, emitNullChecks, concatenatedFields);
+                ExtractFieldsFromParent(compilation, symbol, emitNullChecks, concatenatedFields, constructorSelector);
 
                 FieldInfo[] fields = concatenatedFields.ToArray();
 
@@ -121,7 +156,7 @@ public class AutoConstructorGenerator : IIncrementalGenerator
                     || (g.All(c => c.Type is null) && g.Select(c => c.FallbackType).Distinct(SymbolEqualityComparer.Default).Count() > 1)
                     ))
                 {
-                    foreach (ClassDeclarationSyntax classDeclaration in groupedClasses)
+                    foreach (TTarget classDeclaration in groupedClasses)
                     {
                         context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.MistmatchTypesRule, classDeclaration.GetLocation()));
                     }
@@ -129,12 +164,12 @@ public class AutoConstructorGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                context.AddSource(filename, SourceText.From(GenerateAutoConstructor(symbol, fields, options), Encoding.UTF8));
+                context.AddSource(filename, SourceText.From(GenerateAutoConstructor(symbol, fields, options, codeGenerator()), Encoding.UTF8));
             }
         }
     }
 
-    private static string GenerateAutoConstructor(INamedTypeSymbol symbol, FieldInfo[] fields, AnalyzerConfigOptions options)
+    private static string GenerateAutoConstructor(INamedTypeSymbol symbol, FieldInfo[] fields, AnalyzerConfigOptions options, CodeGenerator<TTarget> codeGenerator)
     {
         bool generateConstructorDocumentation = false;
         if (options.TryGetValue("build_property.AutoConstructor_GenerateConstructorDocumentation", out string? generateConstructorDocumentationSwitch))
@@ -145,10 +180,8 @@ public class AutoConstructorGenerator : IIncrementalGenerator
         options.TryGetValue("build_property.AutoConstructor_ConstructorDocumentationComment", out string? constructorDocumentationComment);
         if (string.IsNullOrWhiteSpace(constructorDocumentationComment))
         {
-            constructorDocumentationComment = "Initializes a new instance of the {0} class.";
+            constructorDocumentationComment = "Initializes a new instance of the {0} {1}.";
         }
-
-        var codeGenerator = new CodeGenerator();
 
         if (fields.Any(f => f.Nullable))
         {
@@ -157,7 +190,8 @@ public class AutoConstructorGenerator : IIncrementalGenerator
 
         if (generateConstructorDocumentation)
         {
-            codeGenerator.AddDocumentation(string.Format(CultureInfo.InvariantCulture, constructorDocumentationComment, symbol.Name));
+            string typeTypeName = typeof(TTarget).Name.Replace("DeclarationSyntax", "").ToLowerInvariant();//record or class
+            codeGenerator.AddDocumentation(string.Format(CultureInfo.InvariantCulture, constructorDocumentationComment, symbol.Name, typeTypeName));
         }
 
         if (!symbol.ContainingNamespace.IsGlobalNamespace)
@@ -265,21 +299,26 @@ public class AutoConstructorGenerator : IIncrementalGenerator
             : null;
     }
 
-    private static void ExtractFieldsFromParent(Compilation compilation, INamedTypeSymbol symbol, bool emitNullChecks, List<FieldInfo> concatenatedFields)
+    private static void ExtractFieldsFromParent(Compilation compilation, INamedTypeSymbol symbol, bool emitNullChecks, List<FieldInfo> concatenatedFields, IConstructorSelector constructorSelector)
     {
         INamedTypeSymbol? baseType = symbol.BaseType;
 
-        // Check if base type is not object (ie. its base type is null) and that there is only one constructor.
-        if (baseType?.BaseType is not null && baseType?.Constructors.Count(d => !d.IsStatic) == 1)
+        // Check if base type is not object (ie. its base type is null) and select valid constructor to call
+
+        if (baseType?.BaseType is not null)
         {
-            IMethodSymbol constructor = baseType.Constructors.Single(d => !d.IsStatic);
-            if (baseType?.HasAttribute(Source.AttributeFullName, compilation) is true)
+            List<IMethodSymbol> validConstructors = constructorSelector.SelectValidConstructors(baseType, compilation);
+            if (validConstructors.Count == 1)
             {
-                ExtractFieldsFromGeneratedParent(compilation, emitNullChecks, concatenatedFields, baseType);
-            }
-            else
-            {
-                ExtractFieldsFromConstructedParent(concatenatedFields, constructor);
+                IMethodSymbol constructor = validConstructors.Single();
+                if (baseType?.HasAttribute(Source.AttributeFullName, compilation) is true)
+                {
+                    ExtractFieldsFromGeneratedParent(compilation, emitNullChecks, concatenatedFields, baseType, constructorSelector);
+                }
+                else
+                {
+                    ExtractFieldsFromConstructedParent(concatenatedFields, constructor);
+                }
             }
         }
     }
@@ -309,7 +348,7 @@ public class AutoConstructorGenerator : IIncrementalGenerator
         }
     }
 
-    private static void ExtractFieldsFromGeneratedParent(Compilation compilation, bool emitNullChecks, List<FieldInfo> concatenatedFields, INamedTypeSymbol symbol)
+    private static void ExtractFieldsFromGeneratedParent(Compilation compilation, bool emitNullChecks, List<FieldInfo> concatenatedFields, INamedTypeSymbol symbol, IConstructorSelector constructorSelector)
     {
         foreach (FieldInfo parameter in GetFieldsFromSymbol(compilation, symbol, emitNullChecks))
         {
@@ -333,6 +372,6 @@ public class AutoConstructorGenerator : IIncrementalGenerator
             }
         }
 
-        ExtractFieldsFromParent(compilation, symbol, emitNullChecks, concatenatedFields);
+        ExtractFieldsFromParent(compilation, symbol, emitNullChecks, concatenatedFields, constructorSelector);
     }
 }

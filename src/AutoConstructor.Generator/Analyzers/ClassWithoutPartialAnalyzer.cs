@@ -25,11 +25,11 @@ public class ClassWithoutPartialAnalyzer : DiagnosticAnalyzer
     {
         var symbol = (INamedTypeSymbol)context.Symbol;
 
-        if (symbol.DeclaringSyntaxReferences[0].GetSyntax() is ClassDeclarationSyntax classDeclarationSyntax
+        if ((symbol.DeclaringSyntaxReferences[0].GetSyntax() is ClassDeclarationSyntax || symbol.DeclaringSyntaxReferences[0].GetSyntax() is RecordDeclarationSyntax)
             && symbol.HasAttribute(Source.AttributeFullName, context.Compilation)
-            && !classDeclarationSyntax.Modifiers.Any(SyntaxKind.PartialKeyword))
+            && !((TypeDeclarationSyntax)symbol.DeclaringSyntaxReferences[0].GetSyntax()).Modifiers.Any(SyntaxKind.PartialKeyword))
         {
-            var diagnostic = Diagnostic.Create(DiagnosticDescriptors.ClassWithoutPartialRule, classDeclarationSyntax.Identifier.GetLocation());
+            var diagnostic = Diagnostic.Create(DiagnosticDescriptors.ClassWithoutPartialRule, ((TypeDeclarationSyntax)symbol.DeclaringSyntaxReferences[0].GetSyntax()).Identifier.GetLocation());
             context.ReportDiagnostic(diagnostic);
         }
     }

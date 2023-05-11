@@ -5,13 +5,32 @@ using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
 namespace AutoConstructor.Generator;
 
-internal class CodeGenerator
+internal class RecordGenerator : CodeGenerator<RecordDeclarationSyntax>
+{
+    protected override RecordDeclarationSyntax CreateWithIdentifier(string identifier)
+    {
+        RecordDeclarationSyntax def = RecordDeclaration(Token(SyntaxKind.RecordKeyword), identifier);
+        return def.WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken)).WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken));
+    }
+}
+
+internal class ClassGenerator : CodeGenerator<ClassDeclarationSyntax>
+{
+    protected override ClassDeclarationSyntax CreateWithIdentifier(string identifier)
+    {
+        return ClassDeclaration(identifier);
+    }
+}
+
+public abstract class CodeGenerator<TTarget> where TTarget : TypeDeclarationSyntax
 {
     private MemberDeclarationSyntax? _current;
     private bool _addNullableAnnotation;
     private string? _constructorDocumentationComment;
 
-    public CodeGenerator AddNullableAnnotation()
+    protected abstract TTarget CreateWithIdentifier(string identifier);
+
+    public CodeGenerator<TTarget> AddNullableAnnotation()
     {
         if (_current is not null)
         {
@@ -22,7 +41,7 @@ internal class CodeGenerator
         return this;
     }
 
-    public CodeGenerator AddDocumentation(string? constructorDocumentationComment)
+    public CodeGenerator<TTarget> AddDocumentation(string? constructorDocumentationComment)
     {
         if (string.IsNullOrWhiteSpace(constructorDocumentationComment))
         {
@@ -33,7 +52,7 @@ internal class CodeGenerator
         return this;
     }
 
-    public CodeGenerator AddNamespace(INamespaceSymbol namespaceSymbol)
+    public CodeGenerator<TTarget> AddNamespace(INamespaceSymbol namespaceSymbol)
     {
         if (_current is not null)
         {
@@ -44,13 +63,13 @@ internal class CodeGenerator
         return this;
     }
 
-    public CodeGenerator AddClass(INamedTypeSymbol classSymbol)
+    public CodeGenerator<TTarget> AddClass(INamedTypeSymbol classSymbol)
     {
         string identifier = classSymbol.Name;
         bool isStatic = classSymbol.IsStatic;
         ITypeParameterSymbol[] typeParameterList = classSymbol.TypeParameters.ToArray();
 
-        ClassDeclarationSyntax classSyntax = GetClass(
+        TTarget classSyntax = GetClass(
             identifier,
             _current is null,
             _addNullableAnnotation,
@@ -63,17 +82,17 @@ internal class CodeGenerator
         }
         else if (_current is BaseNamespaceDeclarationSyntax namespaceDeclarationSyntax)
         {
-            ClassDeclarationSyntax lastClassSyntax = namespaceDeclarationSyntax.DescendantNodes().OfType<ClassDeclarationSyntax>().LastOrDefault();
+            TTarget lastClassSyntax = namespaceDeclarationSyntax.DescendantNodes().OfType<TTarget>().LastOrDefault();
             _current = lastClassSyntax is not null
                 ? namespaceDeclarationSyntax.ReplaceNode(lastClassSyntax, lastClassSyntax.AddMembers(classSyntax))
                 : namespaceDeclarationSyntax.AddMembers(classSyntax);
         }
-        else if (_current is ClassDeclarationSyntax classDeclarationSyntax)
+        else if (_current is TTarget TTarget)
         {
-            ClassDeclarationSyntax lastClassSyntax = classDeclarationSyntax.DescendantNodesAndSelf().OfType<ClassDeclarationSyntax>().LastOrDefault();
+            TTarget lastClassSyntax = TTarget.DescendantNodesAndSelf().OfType<TTarget>().LastOrDefault();
             _current = lastClassSyntax is not null
-                ? classDeclarationSyntax.ReplaceNode(lastClassSyntax, lastClassSyntax.AddMembers(classSyntax))
-                : classDeclarationSyntax.AddMembers(classSyntax);
+                ? TTarget.ReplaceNode(lastClassSyntax, lastClassSyntax.AddMembers(classSyntax))
+                : TTarget.AddMembers(classSyntax);
         }
         else
         {
@@ -83,16 +102,16 @@ internal class CodeGenerator
         return this;
     }
 
-    public CodeGenerator AddConstructor(FieldInfo[] parameters)
+    public CodeGenerator<TTarget> AddConstructor(FieldInfo[] parameters)
     {
-        if (_current is ClassDeclarationSyntax classDeclarationSyntax)
+        if (_current is TTarget TTarget)
         {
-            ClassDeclarationSyntax lastClassSyntax = classDeclarationSyntax.DescendantNodesAndSelf().OfType<ClassDeclarationSyntax>().LastOrDefault();
-            _current = classDeclarationSyntax.ReplaceNode(lastClassSyntax, lastClassSyntax.AddMembers(GetConstructor(lastClassSyntax.Identifier, parameters, _constructorDocumentationComment)));
+            TTarget lastClassSyntax = TTarget.DescendantNodesAndSelf().OfType<TTarget>().LastOrDefault();
+            _current = TTarget.ReplaceNode(lastClassSyntax, lastClassSyntax.AddMembers(GetConstructor(lastClassSyntax.Identifier, parameters, _constructorDocumentationComment)));
         }
-        else if (_current is BaseNamespaceDeclarationSyntax namespaceDeclarationSyntax && namespaceDeclarationSyntax.Members.First() is ClassDeclarationSyntax)
+        else if (_current is BaseNamespaceDeclarationSyntax namespaceDeclarationSyntax && namespaceDeclarationSyntax.Members.First() is TTarget)
         {
-            ClassDeclarationSyntax lastClassSyntax = namespaceDeclarationSyntax.DescendantNodes().OfType<ClassDeclarationSyntax>().LastOrDefault();
+            TTarget lastClassSyntax = namespaceDeclarationSyntax.DescendantNodes().OfType<TTarget>().LastOrDefault();
             if (lastClassSyntax is null)
             {
                 throw new InvalidOperationException("No class was added to the generator.");
@@ -152,15 +171,15 @@ internal class CodeGenerator
             .WithNamespaceKeyword(Token(GetHeaderTrivia(addNullableAnnotation), SyntaxKind.NamespaceKeyword, TriviaList()));
     }
 
-    private static ClassDeclarationSyntax GetClass(string identifier, bool addHeaderTrivia, bool addNullableAnnotation, bool isStatic, ITypeParameterSymbol[] typeParameterList)
+    private TTarget GetClass(string identifier, bool addHeaderTrivia, bool addNullableAnnotation, bool isStatic, ITypeParameterSymbol[] typeParameterList)
     {
         SyntaxToken firstModifier = Token(isStatic ? SyntaxKind.StaticKeyword : SyntaxKind.PartialKeyword);
         if (addHeaderTrivia)
         {
             firstModifier = Token(GetHeaderTrivia(addNullableAnnotation), isStatic ? SyntaxKind.StaticKeyword : SyntaxKind.PartialKeyword, TriviaList());
         }
-
-        ClassDeclarationSyntax declaration = ClassDeclaration(identifier).AddModifiers(firstModifier);
+        TTarget definition = CreateWithIdentifier(identifier);
+        TypeDeclarationSyntax declaration = definition.AddModifiers(firstModifier);
         if (isStatic)
         {
             declaration = declaration.AddModifiers(Token(SyntaxKind.PartialKeyword));
@@ -171,7 +190,7 @@ internal class CodeGenerator
             declaration = declaration.AddTypeParameterListParameters(Array.ConvertAll(typeParameterList, GetTypeParameter));
         }
 
-        return declaration;
+        return (declaration as TTarget)!;
     }
 
     private static ConstructorDeclarationSyntax GetConstructor(SyntaxToken identifier, FieldInfo[] parameters, string? constructorDocumentationComment)

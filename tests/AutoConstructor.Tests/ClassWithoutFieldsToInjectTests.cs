@@ -134,6 +134,38 @@ namespace Test
         }
     }
 }")]
+    [InlineData(@"
+namespace Test
+{
+    [AutoConstructor]
+    internal partial record Test : TestBase {
+        public int Age { get; }
+    }
+
+partial record Test {
+    public Test (int age, double Weight) :base(Weight){
+        this.Age = age;
+    }
+}
+
+    record TestBase (double Weight);
+
+}")]
+    [InlineData(@"
+namespace Test
+{
+    [AutoConstructor]
+    internal partial record Test : TestBase {
+    }
+
+    partial record Test {
+        public Test (double Weight) :base(Weight){
+    }
+}
+
+    record TestBase (double Weight);
+
+}")]
     public async Task Analyzer_ClassWithoutFieldsToInjectButFieldsOnParent_ShouldNotReportDiagnostic(string test)
     {
         DiagnosticResult[] expected = Array.Empty<DiagnosticResult>();

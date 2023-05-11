@@ -25,28 +25,33 @@ public class ClassWithoutPartialCodeFixProvider : CodeFixProvider
 
         Diagnostic? diagnostic = context.Diagnostics[0];
         TextSpan diagnosticSpan = diagnostic.Location.SourceSpan;
+        TryFixDeclaration<ClassDeclarationSyntax>(context, root, diagnostic, diagnosticSpan, "Make class partial");
+        TryFixDeclaration<RecordDeclarationSyntax>(context, root, diagnostic, diagnosticSpan, "Make record partial");
+    }
 
-        ClassDeclarationSyntax? declaration = root?.FindToken(diagnosticSpan.Start).Parent?.AncestorsAndSelf().OfType<ClassDeclarationSyntax>().First();
+    private static void TryFixDeclaration<T>(CodeFixContext context, SyntaxNode? root, Diagnostic diagnostic, TextSpan diagnosticSpan, string title) where T : TypeDeclarationSyntax
+    {
+        T? declaration = root?.FindToken(diagnosticSpan.Start).Parent?.AncestorsAndSelf().OfType<T>().FirstOrDefault();
         if (declaration is not null)
         {
             context.RegisterCodeFix(
                 CodeAction.Create(
-                    title: "Make class partial",
-                    createChangedDocument: c => MakeClassPartialAsync(context.Document, declaration, c),
-                    equivalenceKey: "Make class partial"),
+                    title: title,
+                    createChangedDocument: c => MakeTypePartialAsync(context.Document, declaration, c),
+                    equivalenceKey: title),
                 diagnostic);
         }
     }
 
-    private static async Task<Document> MakeClassPartialAsync(Document document, ClassDeclarationSyntax classDeclarationSyntax, CancellationToken cancellationToken)
+    private static async Task<Document> MakeTypePartialAsync(Document document, TypeDeclarationSyntax typeDeclarationSyntax, CancellationToken cancellationToken)
     {
-        SyntaxTokenList newModifiers = classDeclarationSyntax.Modifiers.Add(SyntaxFactory.Token(SyntaxKind.PartialKeyword));
-        ClassDeclarationSyntax newDeclaration = classDeclarationSyntax.WithModifiers(newModifiers);
+        SyntaxTokenList newModifiers = typeDeclarationSyntax.Modifiers.Add(SyntaxFactory.Token(SyntaxKind.PartialKeyword));
+        TypeDeclarationSyntax newDeclaration = typeDeclarationSyntax.WithModifiers(newModifiers);
 
         SyntaxNode? oldRoot = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
         if (oldRoot is not null)
         {
-            SyntaxNode newRoot = oldRoot.ReplaceNode(classDeclarationSyntax, newDeclaration);
+            SyntaxNode newRoot = oldRoot.ReplaceNode(typeDeclarationSyntax, newDeclaration);
             return document.WithSyntaxRoot(newRoot);
         }
 
