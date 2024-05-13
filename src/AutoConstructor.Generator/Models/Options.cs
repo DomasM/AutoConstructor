@@ -4,4 +4,5 @@ internal sealed record Options(
     bool GenerateConstructorDocumentation,
     string? ConstructorDocumentationComment,
     bool EmitNullChecks,
-    bool EmitThisCalls);
+    bool EmitThisCalls,
+    bool GenerateSerializationOnlyCtor);

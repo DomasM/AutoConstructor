@@ -25,6 +25,7 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         context.RegisterPostInitializationOutput((i) =>
         {
             i.AddSource(Source.AttributeFullName, SourceText.From(Source.AttributeText, Encoding.UTF8));
+            i.AddSource(Source.SerializationAttributeFullName, SourceText.From(Source.SerializerAttributeText, Encoding.UTF8));
             i.AddSource(Source.IgnoreAttributeFullName, SourceText.From(Source.IgnoreAttributeText, Encoding.UTF8));
             i.AddSource(Source.InjectAttributeFullName, SourceText.From(Source.InjectAttributeText, Encoding.UTF8));
             i.AddSource(Source.InitializerAttributeFullName, SourceText.From(Source.InitializerAttributeText, Encoding.UTF8));
@@ -32,6 +33,14 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         });
 
         // TODO: remove in v6
+        AddObsoleteOptionsDiagnostics(context);
+
+        AddGenerator(context, Source.AttributeFullName, generateSerializerOnlyCtor: false);
+        AddGenerator(context, Source.SerializationAttributeFullName, generateSerializerOnlyCtor: true);
+    }
+
+    private static void AddObsoleteOptionsDiagnostics(IncrementalGeneratorInitializationContext context)
+    {
         IncrementalValueProvider<bool> obsoleteOptionDiagnosticProvider = context.AnalyzerConfigOptionsProvider
             .Select((c, _) =>
             {
@@ -41,16 +50,6 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
             })
             .WithTrackingName("obsoleteOptionDiagnosticProvider");
 
-        IncrementalValuesProvider<(GeneratorExectutionResult? result, Options options)> valuesProvider = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                Source.AttributeFullName,
-                static (node, _) => IsSyntaxTargetForGeneration(node),
-                static (context, _) => Execute(context, (TypeDeclarationSyntax)context.TargetNode))
-            .WithTrackingName("Execute")
-            .Where(static m => m is not null)
-            .Combine(context.AnalyzerConfigOptionsProvider.Select((c, _) => ParseOptions(c.GlobalOptions)))
-            .WithTrackingName("Combine");
-
         context.RegisterSourceOutput(obsoleteOptionDiagnosticProvider, static (context, item) =>
         {
             if (item)
@@ -58,22 +57,25 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
                 context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.DisableNullCheckingIsObsoleteRule, null));
             }
         });
+    }
 
-        context.RegisterSourceOutput(valuesProvider, static (context, item) =>
-        {
-            if (item.result is not null)
-            {
-                if (item.result.ReportedDiagnostic is ReportedDiagnostic diagnostic)
-                {
-                    context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.MistmatchTypesRule, Location.Create(diagnostic.FilePath, diagnostic.TextSpan, diagnostic.LineSpan)));
-                }
-                else if (item.result.Symbol is not null)
-                {
-                    string generatedCode = GenerateAutoConstructor(item.result.Symbol!, item.result.Fields, item.options);
-                    context.AddSource($"{item.result.Symbol!.Filename}.g.cs", generatedCode);
-                }
-            }
-        });
+    private static void AddGenerator(IncrementalGeneratorInitializationContext context, string attributeName, bool generateSerializerOnlyCtor)
+    {
+        IncrementalValuesProvider<(GeneratorExectutionResult? result, Options options)> valuesProvider = RegisterForAttributeName(context, attributeName, generateSerializerOnlyCtor);
+        context.RegisterSourceOutput(valuesProvider, GenerateOutput);
+    }
+
+    private static IncrementalValuesProvider<(GeneratorExectutionResult? result, Options options)> RegisterForAttributeName(IncrementalGeneratorInitializationContext context, string attributeName, bool generateSerializerOnlyCtor)
+    {
+        return context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                attributeName,
+                static (node, _) => IsSyntaxTargetForGeneration(node),
+                (context, _) => Execute(context, (TypeDeclarationSyntax)context.TargetNode, generateSerializerOnlyCtor))
+            .WithTrackingName($"Execute{attributeName}")
+            .Where(static m => m is not null)
+            .Combine(context.AnalyzerConfigOptionsProvider.Select((c, _) => ParseOptions(c.GlobalOptions, generateSerializerOnlyCtor)))
+            .WithTrackingName($"Combine{attributeName}");
     }
 
     private static bool IsSyntaxTargetForGeneration(SyntaxNode node)
@@ -82,7 +84,7 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         return node is TypeDeclarationSyntax { AttributeLists.Count: > 0 } typeDeclarationSyntax && typeDeclarationSyntax.Modifiers.Any(SyntaxKind.PartialKeyword);
     }
 
-    private static Options ParseOptions(AnalyzerConfigOptions analyzerOptions)
+    private static Options ParseOptions(AnalyzerConfigOptions analyzerOptions, bool serializerOnly)
     {
         bool generateConstructorDocumentation = false;
         if (analyzerOptions.TryGetValue($"build_property.{BuildProperties.AutoConstructor_GenerateConstructorDocumentation}", out string? generateConstructorDocumentationSwitch))
@@ -110,10 +112,27 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
             emitThisCalls = !enableThisCallsSwitch.Equals("false", StringComparison.OrdinalIgnoreCase);
         }
 
-        return new(generateConstructorDocumentation, constructorDocumentationComment, emitNullChecks, emitThisCalls);
+        return new(generateConstructorDocumentation, constructorDocumentationComment, emitNullChecks, emitThisCalls, serializerOnly);
     }
 
-    private static GeneratorExectutionResult? Execute(GeneratorAttributeSyntaxContext context, TypeDeclarationSyntax typeSyntax)
+    private static void GenerateOutput(SourceProductionContext context, (GeneratorExectutionResult? result, Options options) item)
+    {
+        if (item.result is not null)
+        {
+            if (item.result.ReportedDiagnostic is ReportedDiagnostic diagnostic)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.MistmatchTypesRule, Location.Create(diagnostic.FilePath, diagnostic.TextSpan, diagnostic.LineSpan)));
+            }
+            else if (item.result.Symbol is not null)
+            {
+                string generatedCode = GenerateAutoConstructor(item.result.Symbol!, item.result.Fields, item.options);
+                string hintExtra = item.options.GenerateSerializationOnlyCtor ? ".ser" : "";
+                context.AddSource($"{item.result.Symbol!.Filename}{hintExtra}.g.cs", generatedCode);
+            }
+        }
+    }
+
+    private static GeneratorExectutionResult? Execute(GeneratorAttributeSyntaxContext context, TypeDeclarationSyntax typeSyntax, bool generateSerializerOnlyCtor)
     {
         if (context.TargetSymbol is not INamedTypeSymbol symbol)
         {
@@ -126,7 +145,7 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
 
         EquatableArray<FieldInfo> fields = concatenatedFields.ToImmutableArray();
 
-        if (fields.IsEmpty)
+        if (fields.IsEmpty && !generateSerializerOnlyCtor)
         {
             // No need to report diagnostic, taken care by the analyzers.
             return null;
@@ -233,7 +252,7 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         using (writer.WriteBlock())
         {
             // Get all constuctor parameters from fields. 
-            FieldInfo[] constructorParameters = fields
+            FieldInfo[] constructorParameters = options.GenerateSerializationOnlyCtor ? [] : fields
                 .GroupBy(x => x.ParameterName)
                 .Select(x => x.Any(c => c.Type is not null) ? x.First(c => c.Type is not null) : x.First())
                 .ToArray();
@@ -257,6 +276,11 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
             }
 
             writer.WriteLine($"""[global::System.CodeDom.Compiler.GeneratedCodeAttribute("{nameof(AutoConstructor)}", "{GeneratorVersion}")]""");
+            if (options.GenerateSerializationOnlyCtor)
+            {
+                writer.WriteLine("#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.");
+                writer.WriteLine("""[global::System.ObsoleteAttribute("For serialization only",true)]""");
+            }
 
             // Write constructor signature.
             writer.Write($"{symbol.Accessibility} {symbol.Name}(");
@@ -282,14 +306,17 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
             // Write constructor body.
             using (writer.WriteBlock())
             {
-                foreach (FieldInfo field in fields.Where(f => f.FieldType.HasFlag(FieldType.Initialized)))
+                if (!options.GenerateSerializationOnlyCtor)
                 {
-                    writer.Write($"this.{field.FieldName.SanitizeReservedKeyword()} = {field.Initializer.SanitizeReservedKeyword()}");
-                    if (options.EmitNullChecks && field.EmitArgumentNullException)
+                    foreach (FieldInfo field in fields.Where(f => f.FieldType.HasFlag(FieldType.Initialized)))
                     {
-                        writer.Write($" ?? throw new System.ArgumentNullException(nameof({field.SanitizedParameterName}))");
+                        writer.Write($"this.{field.FieldName.SanitizeReservedKeyword()} = {field.Initializer.SanitizeReservedKeyword()}");
+                        if (options.EmitNullChecks && field.EmitArgumentNullException)
+                        {
+                            writer.Write($" ?? throw new System.ArgumentNullException(nameof({field.SanitizedParameterName}))");
+                        }
+                        writer.WriteLine(";");
                     }
-                    writer.WriteLine(";");
                 }
 
                 if (symbol.InitializerMethod is not null)

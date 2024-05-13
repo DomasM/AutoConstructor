@@ -367,6 +367,38 @@ will generate
     }
 ```
 
+### Parameterless constructor for serialization use
+
+Consider the scenario when you want to expose constructor with parameters for DTO, but serializer requires type to have an empty constructor.
+You can generate such constructor with [SerializerConstructor] attribute.
+
+``` csharp
+[SerializerConstructor]
+public partial class Test
+{
+    public int Id { get; init; }
+    public string Name {get; init;}
+
+    public Test (int id, string name){
+        Id = id;
+        Name = name;
+    }
+}
+```
+
+will generate
+
+```csharp
+ partial class Test
+    {
+        #pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
+        [global::System.ObsoleteAttribute("For serialization only",true)]
+        public Test()
+        {
+        }
+    }
+```
+
 ## Diagnostics
 
 ### ACONS01

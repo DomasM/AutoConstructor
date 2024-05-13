@@ -131,8 +131,8 @@ namespace Test
         // TODO: remove skip in v6
         (_, IncrementalStepRunReason Reason) = Assert.Single(sourceOuputs.Skip(1));
         Assert.Equal(sourceStepReason, Reason);
-        Assert.Equal(executeStepReason, result.TrackedSteps["Execute"].Single().Outputs[0].Reason);
-        Assert.Equal(combineStepReason, result.TrackedSteps["Combine"].Single().Outputs[0].Reason);
+        Assert.Equal(executeStepReason, result.TrackedSteps["ExecuteAutoConstructorAttribute"].Single().Outputs[0].Reason);
+        Assert.Equal(combineStepReason, result.TrackedSteps["CombineAutoConstructorAttribute"].Single().Outputs[0].Reason);
     }
 
     private static CSharpCompilation CreateCompilation(SyntaxTree syntaxTree)
