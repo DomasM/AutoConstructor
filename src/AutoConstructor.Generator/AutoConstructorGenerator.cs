@@ -247,7 +247,7 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
             // Write constructor(s) themselves
             if (generateCtorWithParameters)
             {
-                WriteConstructorDeclaration(symbol, fields, options, false, writer);
+                WriteParametrizedConstructor(symbol, fields, options, writer);
             }
             if (symbol.AddParameterless)
             {
@@ -256,7 +256,7 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
                 {
                     writer.WriteLine("");
                 }
-                WriteConstructorDeclaration(symbol, new EquatableArray<FieldInfo>(), options, true, writer);
+                WriteParameterlessConstructor(symbol, options, writer);
             }
         }
 
@@ -275,10 +275,10 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         return writer.ToString();
     }
 
-    private static void WriteConstructorDeclaration(MainNamedTypeSymbolInfo symbol, EquatableArray<FieldInfo> fields, Options options, bool isParameterLess, IndentedTextWriter writer)
+    private static void WriteParametrizedConstructor(MainNamedTypeSymbolInfo symbol, EquatableArray<FieldInfo> fields, Options options, IndentedTextWriter writer)
     {
         // Get all constructor parameters from fields. 
-        FieldInfo[] constructorParameters = isParameterLess ? [] : fields
+        FieldInfo[] constructorParameters = fields
             .GroupBy(x => x.ParameterName)
             .Select(x => x.Any(c => c.Type is not null) ? x.First(c => c.Type is not null) : x.First())
             .ToArray();
@@ -288,9 +288,7 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         // Write constructor documentation if enable.
         if (generateConstructorDocumentation)
         {
-            writer.WriteLine("/// <summary>");
-            writer.WriteLine($"/// {GetConstructorDocComment(symbol, options, isParameterLess)}");
-            writer.WriteLine("/// </summary>");
+            AddConstructorDocComment(writer, GetParametrizedConstructorDocComment(symbol, options));
             foreach (FieldInfo parameter in constructorParameters)
             {
                 writer.WriteLine($"/// <param name=\"{parameter.ParameterName}\">{parameter.Comment ?? parameter.ParameterName}</param>");
@@ -302,37 +300,24 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         {
             writer.WriteLine("[AutoConstructorDefaultBase]");
         }
-
-        writer.WriteLine($"""[global::System.CodeDom.Compiler.GeneratedCodeAttribute("{nameof(AutoConstructor)}", "{GeneratorVersion}")]""");
-        if (isParameterLess)
-        {
-            writer.WriteLine("#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor.");
-            if (options.MarkParameterlessConstructorAsObsolete)
-            {
-                string obsoleteMessage = GetConstructorDocComment(symbol, options, isParameterLess);//reuse the same comment
-                writer.WriteLine($"""[global::System.ObsoleteAttribute("{obsoleteMessage}", true)]""");
-            }
-        }
+        WriteGeneratedCodeAttribute(writer);
 
         // Write constructor signature.
         writer.Write($"{symbol.Accessibility} {symbol.Name}(");
         writer.Write(string.Join(", ", constructorParameters.Select(p => $"{p.Type ?? p.FallbackType} {p.SanitizedParameterName}")));
         writer.Write(")");
 
-        if (!isParameterLess)
+        // Write base call if any of the parameters is of type PassedToBase
+        if (Array.Exists(constructorParameters, p => p.FieldType.HasFlag(FieldType.PassedToBase)))
         {
-            // Write base call if any of the parameters is of type PassedToBase
-            if (Array.Exists(constructorParameters, p => p.FieldType.HasFlag(FieldType.PassedToBase)))
-            {
-                writer.Write(" : base(");
-                writer.Write(string.Join(", ", constructorParameters.Where(p => p.FieldType.HasFlag(FieldType.PassedToBase)).Select(p => p.SanitizedParameterName)));
-                writer.Write(")");
-            }
-            // Write this call if the symbol has a parameterless constructor
-            else if (options.EmitThisCalls && !symbol.DisableThisCall && symbol.HasParameterlessConstructor)
-            {
-                writer.Write(" : this()");
-            }
+            writer.Write(" : base(");
+            writer.Write(string.Join(", ", constructorParameters.Where(p => p.FieldType.HasFlag(FieldType.PassedToBase)).Select(p => p.SanitizedParameterName)));
+            writer.Write(")");
+        }
+        // Write this call if the symbol has a parameterless constructor
+        else if (options.EmitThisCalls && !symbol.DisableThisCall && symbol.HasParameterlessConstructor)
+        {
+            writer.Write(" : this()");
         }
 
         // End constructor line.
@@ -341,42 +326,80 @@ public sealed class AutoConstructorGenerator : IIncrementalGenerator
         // Write constructor body.
         using (writer.WriteBlock())
         {
-            if (!isParameterLess)
+            foreach (FieldInfo field in fields.Where(f => f.FieldType.HasFlag(FieldType.Initialized)))
             {
-                foreach (FieldInfo field in fields.Where(f => f.FieldType.HasFlag(FieldType.Initialized)))
+                writer.Write($"this.{field.FieldName.SanitizeReservedKeyword()} = {field.Initializer.SanitizeReservedKeyword()}");
+                if (options.EmitNullChecks && field.EmitArgumentNullException)
                 {
-                    writer.Write($"this.{field.FieldName.SanitizeReservedKeyword()} = {field.Initializer.SanitizeReservedKeyword()}");
-                    if (options.EmitNullChecks && field.EmitArgumentNullException)
-                    {
-                        writer.Write($" ?? throw new System.ArgumentNullException(nameof({field.SanitizedParameterName}))");
-                    }
-                    writer.WriteLine(";");
+                    writer.Write($" ?? throw new System.ArgumentNullException(nameof({field.SanitizedParameterName}))");
                 }
+                writer.WriteLine(";");
             }
-
-            if (symbol.InitializerMethod is not null)
-            {
-                writer.WriteLine();
-                writer.WriteLine($"{(!symbol.InitializerMethod.IsStatic ? "this." : "")}{symbol.InitializerMethod.Name}();");
-            }
+            AddInitializerMethodCall(symbol, writer);
         }
     }
 
-    private static string GetConstructorDocComment(MainNamedTypeSymbolInfo symbol, Options options, bool isParameterLess)
+    private static void WriteParameterlessConstructor(MainNamedTypeSymbolInfo symbol, Options options, IndentedTextWriter writer)
     {
-        if (isParameterLess)
+        string docComment = GetParameterLessConstructorDocComment(symbol, options);
+        // Write constructor documentation if enabled.
+        if (options.GenerateConstructorDocumentation)
         {
-            if (string.IsNullOrWhiteSpace(options.ParameterlessConstructorObsoleteMessage))
-            {
-                return "For serialization only.";
-            }
-            return string.Format(options.ParameterlessConstructorObsoleteMessage!, symbol.Name, CultureInfo.InvariantCulture);
+            AddConstructorDocComment(writer, docComment);
         }
+        WriteGeneratedCodeAttribute(writer);
+        writer.WriteLine("#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor.");
+        if (options.MarkParameterlessConstructorAsObsolete)
+        {
+            writer.WriteLine($"""[global::System.ObsoleteAttribute("{docComment}", true)]""");
+        }
+        // Write constructor signature.
+        writer.Write($"{symbol.Accessibility} {symbol.Name}()");
+        writer.WriteLine();
+        // Write constructor body.
+        using (writer.WriteBlock())
+        {
+            AddInitializerMethodCall(symbol, writer);
+        }
+    }
+
+    private static void AddConstructorDocComment(IndentedTextWriter writer, string docComment)
+    {
+        writer.WriteLine("/// <summary>");
+        writer.WriteLine($"/// {docComment}");
+        writer.WriteLine("/// </summary>");
+    }
+
+    private static string GetParameterLessConstructorDocComment(MainNamedTypeSymbolInfo symbol, Options options)
+    {
+        if (string.IsNullOrWhiteSpace(options.ParameterlessConstructorObsoleteMessage))
+        {
+            return "For serialization only.";
+        }
+        return string.Format(options.ParameterlessConstructorObsoleteMessage!, symbol.Name, CultureInfo.InvariantCulture);
+    }
+
+    private static string GetParametrizedConstructorDocComment(MainNamedTypeSymbolInfo symbol, Options options)
+    {
         if (string.IsNullOrWhiteSpace(options.ConstructorDocumentationComment))
         {
             return string.Format($"Initializes a new instance of the {{0}} {(symbol.Kind is TypeKind.Struct ? "struct" : "class")}.", symbol.Name, CultureInfo.InvariantCulture);
         }
         return string.Format(options.ConstructorDocumentationComment!, symbol.Name, CultureInfo.InvariantCulture);
+    }
+
+    private static void WriteGeneratedCodeAttribute(IndentedTextWriter writer)
+    {
+        writer.WriteLine($"""[global::System.CodeDom.Compiler.GeneratedCodeAttribute("{nameof(AutoConstructor)}", "{GeneratorVersion}")]""");
+    }
+
+    private static void AddInitializerMethodCall(MainNamedTypeSymbolInfo symbol, IndentedTextWriter writer)
+    {
+        if (symbol.InitializerMethod is not null)
+        {
+            writer.WriteLine();
+            writer.WriteLine($"{(!symbol.InitializerMethod.IsStatic ? "this." : "")}{symbol.InitializerMethod.Name}();");
+        }
     }
 
     private static List<FieldInfo> GetFieldsFromSymbol(INamedTypeSymbol symbol)

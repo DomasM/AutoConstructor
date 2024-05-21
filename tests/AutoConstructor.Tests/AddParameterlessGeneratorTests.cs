@@ -121,6 +121,38 @@ namespace Test
         await VerifySourceGenerator.RunAsync(code, generated, expectedConstructors: Verifiers.ConstructorType.Both);
     }
 
+    [Fact]
+    public async Task Run_WithOptionAndToInject_ShouldGenerateTwoConstructorsSingleDefaultBase()
+    {
+        const string code = @"
+namespace Test
+{
+    [AutoConstructor (addParameterless:true, addDefaultBaseAttribute: true)]
+    internal partial class Test
+    {
+        public int X {get;set;}
+        private readonly int _t;
+    }
+}";
+        const string generated = """
+namespace Test
+{
+    partial class Test
+    {
+        [AutoConstructorDefaultBase]
+        public Test(int t)
+        {
+            this._t = t;
+        }
+        public Test()
+        {
+        }
+    }
+}
+""";
+        await VerifySourceGenerator.RunAsync(code, generated, expectedConstructors: Verifiers.ConstructorType.Both);
+    }
+
     /// <summary>
     /// Note  that : this() won't be generated, because that would call generated constructor marked with [Obsolete].
     /// </summary>
